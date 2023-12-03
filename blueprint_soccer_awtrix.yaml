@@ -111,8 +111,8 @@ variables:
         {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
         {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
         {{ first_half }}
-        {"dt":[8, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[21, 1, "{{ opponent_score }}",[255,255,255]]}, 
+        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
+        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
         {"dl":[14,3,17,3,"#ffffff"]} 
       ], 
       "duration": {{ message_duration }} 
@@ -127,8 +127,8 @@ variables:
         {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
         {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
         {{ second_half }}
-        {"dt":[8, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[21, 1, "{{ opponent_score }}",[255,255,255]]}, 
+        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
+        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
         {"dl":[14,3,17,3,"#ffffff"]} 
       ], 
       "duration": {{ message_duration }} 
@@ -143,8 +143,8 @@ variables:
         {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
         {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
         {{ third_quarter }}
-        {"dt":[8, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[21, 1, "{{ opponent_score }}",[255,255,255]]}, 
+        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
+        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
         {"dl":[14,3,17,3,"#ffffff"]} 
       ], 
       "duration": {{ message_duration }} 
@@ -159,8 +159,8 @@ variables:
         {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
         {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
         {{ fourth_quarter }}
-        {"dt":[8, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[21, 1, "{{ opponent_score }}",[255,255,255]]}, 
+        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
+        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
         {"dl":[14,3,17,3,"#ffffff"]} 
       ], 
       "duration": {{ message_duration }} 
