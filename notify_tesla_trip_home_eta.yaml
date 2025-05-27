@@ -1,0 +1,124 @@
+blueprint:
+  name: Notify Tesla Trip Home + Arrival Time Delay Alerts
+  description: >
+    Sends a notification when Tesla starts driving home, and notifies if ETA arrival time is delayed by more than X minutes.
+  domain: automation
+  input:
+    route_destination_sensor:
+      name: Tesla Destination Sensor
+      default: sensor.tesla_active_route_destination
+      selector:
+        entity:
+          domain: sensor
+    route_arrival_time_sensor:
+      name: ETA Arrival Time Sensor
+      default: sensor.deltaflyer_arrival_time
+      selector:
+        entity:
+          domain: sensor
+    route_distance_sensor:
+      name: ETA Distance Sensor (optional)
+      default: sensor.tesla_active_route_distance_to_arrival_km
+      selector:
+        entity:
+          domain: sensor
+    home_destination_value:
+      name: Destination Name for Home
+      default: "Thuis"
+    notify_service:
+      name: Notify Service
+      default: notify.mobile_app_inb15
+      selector:
+        text:
+    eta_helper:
+      name: Input Number Helper for Last ETA Timestamp
+      default: input_number.last_arrival_timestamp
+      selector:
+        entity:
+          domain: input_number
+    change_threshold:
+      name: Delay Threshold (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+    reset_on_arrival:
+      name: Reset ETA timestamp when arriving home
+      default: true
+      selector:
+        boolean:
+
+mode: parallel
+max: 10
+
+trigger:
+  - platform: state
+    entity_id: !input route_destination_sensor
+    to: !input home_destination_value
+    for:
+      minutes: 2
+    id: trip_start
+  - platform: state
+    entity_id: !input route_arrival_time_sensor
+    id: eta_update
+  - platform: state
+    entity_id: !input route_destination_sensor
+    to: !input home_destination_value
+    id: reset_eta
+
+condition: []
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: trip_start
+        sequence:
+          - service: !input notify_service
+            data:
+              message: >
+                🚗 Je bent onderweg naar huis!
+                Verwachte aankomst rond {{ as_timestamp(states(route_arrival_time_sensor)) | timestamp_custom('%H:%M') }}.
+                Afstand: {{ states(route_distance_sensor) }} km.
+          - service: input_number.set_value
+            target:
+              entity_id: !input eta_helper
+            data:
+              value: "{{ as_timestamp(states(route_arrival_time_sensor)) | int }}"
+
+      - conditions:
+          - condition: trigger
+            id: eta_update
+          - condition: state
+            entity_id: !input route_destination_sensor
+            state: !input home_destination_value
+          - condition: template
+            value_template: >
+              {% set last = states(eta_helper) | int %}
+              {% set current = as_timestamp(states(route_arrival_time_sensor)) | int %}
+              {{ (current - last) > (change_threshold * 60) }}
+        sequence:
+          - service: !input notify_service
+            data:
+              message: >
+                ⚠️ Je aankomsttijd is vertraagd!
+                Nieuwe aankomst rond {{ as_timestamp(states(route_arrival_time_sensor)) | timestamp_custom('%H:%M') }}.
+          - service: input_number.set_value
+            target:
+              entity_id: !input eta_helper
+            data:
+              value: "{{ as_timestamp(states(route_arrival_time_sensor)) | int }}"
+
+      - conditions:
+          - condition: trigger
+            id: reset_eta
+          - condition: template
+            value_template: "{{ reset_on_arrival }}"
+        sequence:
+          - service: input_number.set_value
+            target:
+              entity_id: !input eta_helper
+            data:
+              value: 0
