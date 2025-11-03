@@ -1,7 +1,8 @@
 blueprint:
   name: Notify Tesla Trip Home + Arrival Time Delay Alerts
   description: >
-    Sends a notification when Tesla starts driving home, and notifies if ETA arrival time is delayed by more than X minutes.
+    Sends a notification when Tesla starts driving home (destination = "Thuis"), and notifies if ETA arrival time is delayed
+    by more than a configurable number of minutes. Tracks arrival time as a timestamp, not as minutes.
   domain: automation
   input:
     route_destination_sensor:
