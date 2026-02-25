@@ -1,0 +1,126 @@
+blueprint:
+  name: Zigbee2MQTT - Philips Hue Dimmer (RWL021/324131092621) - Full mapping
+  description: Map all Zigbee2MQTT action values from the Philips Hue dimmer to Home Assistant actions.
+  domain: automation
+  input:
+    z2m_friendly_name:
+      name: Zigbee2MQTT friendly name
+      description: The friendly_name of the remote in Zigbee2MQTT (topic is zigbee2mqtt/<friendly_name>)
+      selector:
+        text:
+
+    on_press:
+      name: on_press
+      default: []
+      selector: { action: {} }
+    on_press_release:
+      name: on_press_release
+      default: []
+      selector: { action: {} }
+    on_hold:
+      name: on_hold
+      default: []
+      selector: { action: {} }
+    on_hold_release:
+      name: on_hold_release
+      default: []
+      selector: { action: {} }
+
+    up_press:
+      name: up_press
+      default: []
+      selector: { action: {} }
+    up_press_release:
+      name: up_press_release
+      default: []
+      selector: { action: {} }
+    up_hold:
+      name: up_hold
+      default: []
+      selector: { action: {} }
+    up_hold_release:
+      name: up_hold_release
+      default: []
+      selector: { action: {} }
+
+    down_press:
+      name: down_press
+      default: []
+      selector: { action: {} }
+    down_press_release:
+      name: down_press_release
+      default: []
+      selector: { action: {} }
+    down_hold:
+      name: down_hold
+      default: []
+      selector: { action: {} }
+    down_hold_release:
+      name: down_hold_release
+      default: []
+      selector: { action: {} }
+
+    off_press:
+      name: off_press
+      default: []
+      selector: { action: {} }
+    off_press_release:
+      name: off_press_release
+      default: []
+      selector: { action: {} }
+    off_hold:
+      name: off_hold
+      default: []
+      selector: { action: {} }
+    off_hold_release:
+      name: off_hold_release
+      default: []
+      selector: { action: {} }
+
+mode: single
+
+trigger:
+  - platform: mqtt
+    topic: "zigbee2mqtt/{{ z2m_friendly_name }}"
+
+variables:
+  a: "{{ trigger.payload_json.action | default('') }}"
+
+action:
+  - choose:
+      - conditions: "{{ a == 'on_press' }}"
+        sequence: !input on_press
+      - conditions: "{{ a == 'on_press_release' }}"
+        sequence: !input on_press_release
+      - conditions: "{{ a == 'on_hold' }}"
+        sequence: !input on_hold
+      - conditions: "{{ a == 'on_hold_release' }}"
+        sequence: !input on_hold_release
+
+      - conditions: "{{ a == 'up_press' }}"
+        sequence: !input up_press
+      - conditions: "{{ a == 'up_press_release' }}"
+        sequence: !input up_press_release
+      - conditions: "{{ a == 'up_hold' }}"
+        sequence: !input up_hold
+      - conditions: "{{ a == 'up_hold_release' }}"
+        sequence: !input up_hold_release
+
+      - conditions: "{{ a == 'down_press' }}"
+        sequence: !input down_press
+      - conditions: "{{ a == 'down_press_release' }}"
+        sequence: !input down_press_release
+      - conditions: "{{ a == 'down_hold' }}"
+        sequence: !input down_hold
+      - conditions: "{{ a == 'down_hold_release' }}"
+        sequence: !input down_hold_release
+
+      - conditions: "{{ a == 'off_press' }}"
+        sequence: !input off_press
+      - conditions: "{{ a == 'off_press_release' }}"
+        sequence: !input off_press_release
+      - conditions: "{{ a == 'off_hold' }}"
+        sequence: !input off_hold
+      - conditions: "{{ a == 'off_hold_release' }}"
+        sequence: !input off_hold_release
+    default: []
