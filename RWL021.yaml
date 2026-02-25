@@ -1,6 +1,8 @@
 blueprint:
-  name: Z2M - Philips Hue Dimmer (RWL021) - Device trigger mapping
-  description: Map all Philips Hue dimmer button actions (on/up/down/off press/hold/release) via Zigbee2MQTT device triggers.
+  name: Z2M - Hue Dimmer (RWL021) - Lights + smooth dim on hold
+  description: >
+    For Philips Hue Dimmer RWL021 (Zigbee2MQTT). Map on/off press actions, and do smooth
+    brightness ramp on up/down hold (stop on release).
   domain: automation
 
   input:
@@ -9,75 +11,52 @@ blueprint:
       selector:
         device:
 
-    on_press:
-      name: on_press
-      default: []
-      selector: { action: {} }
-    on_press_release:
-      name: on_press_release
-      default: []
-      selector: { action: {} }
-    on_hold:
-      name: on_hold
-      default: []
-      selector: { action: {} }
-    on_hold_release:
-      name: on_hold_release
-      default: []
-      selector: { action: {} }
+    light_target:
+      name: Light (or group) to control
+      selector:
+        target:
+          entity:
+            domain: light
 
-    up_press:
-      name: up_press
+    # What to do on normal presses (optional; defaults provided)
+    on_press_action:
+      name: On press action (optional)
+      description: What to do when ON is pressed.
       default: []
-      selector: { action: {} }
-    up_press_release:
-      name: up_press_release
-      default: []
-      selector: { action: {} }
-    up_hold:
-      name: up_hold
-      default: []
-      selector: { action: {} }
-    up_hold_release:
-      name: up_hold_release
-      default: []
-      selector: { action: {} }
+      selector:
+        action: {}
 
-    down_press:
-      name: down_press
+    off_press_action:
+      name: Off press action (optional)
+      description: What to do when OFF is pressed.
       default: []
-      selector: { action: {} }
-    down_press_release:
-      name: down_press_release
-      default: []
-      selector: { action: {} }
-    down_hold:
-      name: down_hold
-      default: []
-      selector: { action: {} }
-    down_hold_release:
-      name: down_hold_release
-      default: []
-      selector: { action: {} }
+      selector:
+        action: {}
 
-    off_press:
-      name: off_press
-      default: []
-      selector: { action: {} }
-    off_press_release:
-      name: off_press_release
-      default: []
-      selector: { action: {} }
-    off_hold:
-      name: off_hold
-      default: []
-      selector: { action: {} }
-    off_hold_release:
-      name: off_hold_release
-      default: []
-      selector: { action: {} }
+    # Smooth dim settings
+    step_pct:
+      name: Brightness step (%)
+      description: Smaller = smoother/slower. Typical 2–6.
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: slider
 
-mode: single
+    interval_ms:
+      name: Step interval (ms)
+      description: Lower = smoother/faster updates. Typical 120–250.
+      default: 150
+      selector:
+        number:
+          min: 80
+          max: 500
+          step: 10
+          mode: slider
+
+mode: restart
 
 trigger:
   - platform: device
@@ -86,74 +65,6 @@ trigger:
     type: action
     subtype: on_press
     id: on_press
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: on_press_release
-    id: on_press_release
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: on_hold
-    id: on_hold
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: on_hold_release
-    id: on_hold_release
-
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: up_press
-    id: up_press
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: up_press_release
-    id: up_press_release
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: up_hold
-    id: up_hold
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: up_hold_release
-    id: up_hold_release
-
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: down_press
-    id: down_press
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: down_press_release
-    id: down_press_release
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: down_hold
-    id: down_hold
-  - platform: device
-    domain: mqtt
-    device_id: !input remote
-    type: action
-    subtype: down_hold_release
-    id: down_hold_release
 
   - platform: device
     domain: mqtt
@@ -161,60 +72,110 @@ trigger:
     type: action
     subtype: off_press
     id: off_press
+
   - platform: device
     domain: mqtt
     device_id: !input remote
     type: action
-    subtype: off_press_release
-    id: off_press_release
+    subtype: up_hold
+    id: up_hold
+
   - platform: device
     domain: mqtt
     device_id: !input remote
     type: action
-    subtype: off_hold
-    id: off_hold
+    subtype: down_hold
+    id: down_hold
+
+  # Stop on release
   - platform: device
     domain: mqtt
     device_id: !input remote
     type: action
-    subtype: off_hold_release
-    id: off_hold_release
+    subtype: up_hold_release
+    id: stop
+  - platform: device
+    domain: mqtt
+    device_id: !input remote
+    type: action
+    subtype: down_hold_release
+    id: stop
+
+  # Optional: also stop on press_release events
+  - platform: device
+    domain: mqtt
+    device_id: !input remote
+    type: action
+    subtype: up_press_release
+    id: stop
+  - platform: device
+    domain: mqtt
+    device_id: !input remote
+    type: action
+    subtype: down_press_release
+    id: stop
+
+variables:
+  step_pct: !input step_pct
+  interval_ms: !input interval_ms
+  light_target: !input light_target
 
 action:
   - choose:
+      # STOP branch
+      - conditions: "{{ trigger.id == 'stop' }}"
+        sequence:
+          - stop: "released"
+
+      # ON press
       - conditions: "{{ trigger.id == 'on_press' }}"
-        sequence: !input on_press
-      - conditions: "{{ trigger.id == 'on_press_release' }}"
-        sequence: !input on_press_release
-      - conditions: "{{ trigger.id == 'on_hold' }}"
-        sequence: !input on_hold
-      - conditions: "{{ trigger.id == 'on_hold_release' }}"
-        sequence: !input on_hold_release
+        sequence:
+          - choose:
+              - conditions: "{{ (on_press_action | default([])) | length > 0 }}"
+                sequence: !input on_press_action
+            default:
+              - service: light.turn_on
+                target: !input light_target
 
-      - conditions: "{{ trigger.id == 'up_press' }}"
-        sequence: !input up_press
-      - conditions: "{{ trigger.id == 'up_press_release' }}"
-        sequence: !input up_press_release
-      - conditions: "{{ trigger.id == 'up_hold' }}"
-        sequence: !input up_hold
-      - conditions: "{{ trigger.id == 'up_hold_release' }}"
-        sequence: !input up_hold_release
-
-      - conditions: "{{ trigger.id == 'down_press' }}"
-        sequence: !input down_press
-      - conditions: "{{ trigger.id == 'down_press_release' }}"
-        sequence: !input down_press_release
-      - conditions: "{{ trigger.id == 'down_hold' }}"
-        sequence: !input down_hold
-      - conditions: "{{ trigger.id == 'down_hold_release' }}"
-        sequence: !input down_hold_release
-
+      # OFF press
       - conditions: "{{ trigger.id == 'off_press' }}"
-        sequence: !input off_press
-      - conditions: "{{ trigger.id == 'off_press_release' }}"
-        sequence: !input off_press_release
-      - conditions: "{{ trigger.id == 'off_hold' }}"
-        sequence: !input off_hold
-      - conditions: "{{ trigger.id == 'off_hold_release' }}"
-        sequence: !input off_hold_release
+        sequence:
+          - choose:
+              - conditions: "{{ (off_press_action | default([])) | length > 0 }}"
+                sequence: !input off_press_action
+            default:
+              - service: light.turn_off
+                target: !input light_target
+
+      # Smooth DIM UP while holding
+      - conditions: "{{ trigger.id == 'up_hold' }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ true }}"
+              sequence:
+                - service: light.turn_on
+                  target: !input light_target
+                  data:
+                    brightness_step_pct: "{{ step_pct }}"
+                    transition: 0
+                - delay:
+                    milliseconds: "{{ interval_ms }}"
+
+      # Smooth DIM DOWN while holding
+      - conditions: "{{ trigger.id == 'down_hold' }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ true }}"
+              sequence:
+                - service: light.turn_on
+                  target: !input light_target
+                  data:
+                    brightness_step_pct: "{{ -step_pct }}"
+                    transition: 0
+                - delay:
+                    milliseconds: "{{ interval_ms }}"
     default: []
