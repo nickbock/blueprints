@@ -1,28 +1,54 @@
 blueprint:
-  name: "AWTRIX - Soccer Team Scoreboard"
+  name: "AWTRIX NG - Soccer Team Scoreboard"
   author: Tevoll
   description: >
-    # Soccer Team Scoreboard for AWTRIX Light
+    # Soccer Team Scoreboard for AWTRIX NG
+
+    Draws a live scoreboard for a TeamTracker soccer sensor on an AWTRIX NG
+    matrix: both team colours, the score, and a period indicator along the
+    bottom row.
+
+    The period indicator follows the ESPN period TeamTracker exposes as the
+    `quarter` attribute - 1 = first half, 2 = second half, 3 and 4 = the two
+    extra-time halves, 5 = penalty shootout:
+
+    - First half - left dash lit, right dash dim
+    - Second half - both dashes lit
+    - Extra time 1 - four pips, the last one dim
+    - Extra time 2 - four pips, all lit
+    - Penalties - four pips lit and an amber divider
+
+    During a shootout TeamTracker reports the score as `1(4)`. The board then
+    shows the shootout tally rather than the goals, which are level by
+    definition; the amber divider marks that you are reading penalties.
+
+    Requires AWTRIX NG firmware with MQTT + Home Assistant discovery enabled.
+    For the older AWTRIX 3 / AWTRIX Light firmware, use the previous revision
+    of this blueprint - the MQTT topics and payload format are not compatible.
 
   domain: automation
 
+  homeassistant:
+    min_version: "2024.11.0"
+
   input:
     awtrix:
-      name: AWTRIX Light
+      name: AWTRIX NG
       description: >-
-        Select the Awtrix light
+        Select the AWTRIX NG device(s) to draw the scoreboard on.
       selector:
         device:
           filter:
             - integration: mqtt
               manufacturer: Blueforcer
-              model: AWTRIX Light
+              model: AWTRIX NG
           multiple: true
 
     appname:
       name: Awtrix Application name
       description: >-
-        This is the app name listed in the MQTT topic - it should be unique
+        This is the app name used in the MQTT topic - it should be unique.
+        AWTRIX NG requires it to match [A-Za-z0-9_-], 1-32 characters.
       default: "soccerteamscore"
       selector:
         text:
@@ -46,13 +72,16 @@ blueprint:
           filter:
             - integration: teamtracker
 
-  source_url: https://raw.githubusercontent.com/fettesb/Homeassistant_blueprints/main/Awtrix%20NFL%20Team%20Scoreboard/awtrix_nfl_team_scoreboard.yaml
+  source_url: https://github.com/nickbock/blueprints/blob/main/blueprint_soccer_awtrix.yaml
 
 variables:
   device_ids: !input awtrix
+  # AWTRIX NG publishes its own topic prefix to a "MQTT prefix" sensor.
+  # Resolve each picked device to that prefix; every topic below hangs off it.
   devices: >-
     {% macro get_device(device_id) %}
-      {{ states((device_entities(device_id) | select('search','device_topic') | list)[0] | default('unknown')) }}
+      {% set e = device_entities(device_id) | select('search', 'mqtt_prefix') | list %}
+      {{ states(e[0]) if e else 'unknown' }}
     {% endmacro %}
     {% set ns = namespace(devices=[]) %}
     {% for device_id in device_ids %}
@@ -63,115 +92,82 @@ variables:
   appname: !input appname
   my_sensor: !input my_sensor
   message_duration: !input message_duration
-  team_colors_0: "{{ state_attr(my_sensor, 'team_colors')[0] }}"
-  team_colors_1: "{{ state_attr(my_sensor, 'team_colors')[1] }}"
-  opponent_colors_0: "{{ state_attr(my_sensor, 'opponent_colors')[0] }}"
-  opponent_colors_1: "{{ state_attr(my_sensor, 'opponent_colors')[1] }}"
+
+  # NG validates the whole payload: one unreadable colour rejects everything,
+  # so fall back to plain white/black when the sensor has no colours yet.
+  team_colors: "{{ state_attr(my_sensor, 'team_colors') or ['#FFFFFF', '#000000'] }}"
+  opponent_colors: "{{ state_attr(my_sensor, 'opponent_colors') or ['#FFFFFF', '#000000'] }}"
+  team_colors_0: "{{ team_colors[0] }}"
+  team_colors_1: "{{ team_colors[1] }}"
+  opponent_colors_0: "{{ opponent_colors[0] }}"
+  opponent_colors_1: "{{ opponent_colors[1] }}"
+
+  # ESPN period, via TeamTracker's "quarter" attribute:
+  # 1 = first half, 2 = second half, 3/4 = extra time, 5 = penalties.
+  period: "{{ state_attr(my_sensor, 'quarter') | int(0) }}"
+
+  # TeamTracker writes "1(4)" once a shootout starts - goals, then the
+  # shootout tally. Show the tally when there is one; the goals are level.
+  # These stay plain numbers: HA parses a rendered "00" back to the integer
+  # 0, so the zero-padding has to happen inside the payload template below,
+  # where it is serialised straight to JSON and never round-trips.
   team_score: >-
-    {% set raw_team_score = state_attr(my_sensor, 'team_score') %}
-    {% if raw_team_score|int < 10 %}
-      {{  "0" + raw_team_score|string }}
-    {% else %}
-        {{ raw_team_score|string }}
-    {% endif %}
+    {% set raw = state_attr(my_sensor, 'team_score') | string %}
+    {% set goals = raw.split('(')[0] | int(0) %}
+    {% set pens = raw.split('(')[1] | replace(')', '') | int(-1) if '(' in raw else -1 %}
+    {{ pens if pens >= 0 else goals }}
   opponent_score: >-
-    {% set raw_opponent_score = state_attr(my_sensor, 'opponent_score') %}
-    {% if raw_opponent_score|int < 10 %}
-        {{ "0" + raw_opponent_score|string }}
+    {% set raw = state_attr(my_sensor, 'opponent_score') | string %}
+    {% set goals = raw.split('(')[0] | int(0) %}
+    {% set pens = raw.split('(')[1] | replace(')', '') | int(-1) if '(' in raw else -1 %}
+    {{ pens if pens >= 0 else goals }}
+
+  # Bottom-row period indicator, appended after the base drawing. Row 7 is
+  # clear of the scores (rows 1-6), and the penalties case redraws the
+  # divider in amber - later draw commands win.
+  period_marker: >-
+    {% if period >= 5 %}
+      {{ [["pixels", "#FFFFFF", 12, 7, 14, 7, 17, 7, 19, 7],
+          ["line", 14, 3, 17, 3, "#FFAA00"]] }}
+    {% elif period == 4 %}
+      {{ [["pixels", "#FFFFFF", 12, 7, 14, 7, 17, 7, 19, 7]] }}
+    {% elif period == 3 %}
+      {{ [["pixels", "#FFFFFF", 12, 7, 14, 7, 17, 7],
+          ["pixel", 19, 7, "#919191"]] }}
+    {% elif period == 2 %}
+      {{ [["line", 12, 7, 13, 7, "#FFFFFF"],
+          ["line", 18, 7, 19, 7, "#FFFFFF"]] }}
     {% else %}
-        {{ raw_opponent_score|string }}
+      {{ [["line", 12, 7, 13, 7, "#FFFFFF"],
+          ["line", 18, 7, 19, 7, "#919191"]] }}
     {% endif %}
-  first_half: >-
-    {"dl":[12,7,13,7,"#ffffff"]},
-    {"dl":[18,7,19,7,"#919191"]},
-  second_half: >-
-    {"dl":[12,7,13,7,"#ffffff"]},
-    {"dl":[18,7,19,7,"#ffffff"]},
-  third_quarter: >-
-    {"dp":[12,7,"#ffffff"]},
-    {"dp":[14,7,"#ffffff"]},
-    {"dp":[17,7,"#ffffff"]},
-    {"dp":[19,7,"#919191"]},
-  fourth_quarter: >-
-    {"dp":[12,7,"#ffffff"]},
-    {"dp":[14,7,"#ffffff"]},
-    {"dp":[17,7,"#ffffff"]},
-    {"dp":[19,7,"#ffffff"]},  
-  payload_switch: >-
-    {
-      "name" : "{{ appname }}"
-    }
-  payload_game_start: >-
-    {
-      "draw":[ 
-        {"df":[0,0,16,8,"{{ team_colors_0 }}"]},     
-        {"df":[16,0,16,8,"{{ opponent_colors_0 }}"]}, 
-        {"dl":[1,0,1,7,"{{ team_colors_1 }}"]},
-        {"dl":[3,0,3,7,"{{ team_colors_1 }}"]},
-        {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
-        {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
-        {{ first_half }}
-        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
-        {"dl":[14,3,17,3,"#ffffff"]} 
-      ], 
-      "duration": {{ message_duration }} 
-    }
-  payload_second_half: >-
-    {
-      "draw":[ 
-        {"df":[0,0,16,8,"{{ team_colors_0 }}"]},     
-        {"df":[16,0,16,8,"{{ opponent_colors_0 }}"]}, 
-        {"dl":[1,0,1,7,"{{ team_colors_1 }}"]},
-        {"dl":[3,0,3,7,"{{ team_colors_1 }}"]},
-        {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
-        {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
-        {{ second_half }}
-        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
-        {"dl":[14,3,17,3,"#ffffff"]} 
-      ], 
-      "duration": {{ message_duration }} 
-    }
-  payload_third_quarter: >-
-    {
-      "draw":[ 
-        {"df":[0,0,16,8,"{{ team_colors_0 }}"]},     
-        {"df":[16,0,16,8,"{{ opponent_colors_0 }}"]}, 
-        {"dl":[1,0,1,7,"{{ team_colors_1 }}"]},
-        {"dl":[3,0,3,7,"{{ team_colors_1 }}"]},
-        {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
-        {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
-        {{ third_quarter }}
-        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
-        {"dl":[14,3,17,3,"#ffffff"]} 
-      ], 
-      "duration": {{ message_duration }} 
-    }
-  payload_fourth_quarter: >-
-    {
-      "draw":[ 
-        {"df":[0,0,16,8,"{{ team_colors_0 }}"]},     
-        {"df":[16,0,16,8,"{{ opponent_colors_0 }}"]}, 
-        {"dl":[1,0,1,7,"{{ team_colors_1 }}"]},
-        {"dl":[3,0,3,7,"{{ team_colors_1 }}"]},
-        {"dl":[28,0,28,7,"{{ opponent_colors_1 }}"]}, 
-        {"dl":[30,0,30,7,"{{ opponent_colors_1 }}"]}, 
-        {{ fourth_quarter }}
-        {"dt":[5, 1, "{{ team_score }}",[255,255,255]]}, 
-        {"dt":[20, 1, "{{ opponent_score }}",[255,255,255]]}, 
-        {"dl":[14,3,17,3,"#ffffff"]} 
-      ], 
-      "duration": {{ message_duration }} 
-    }
-trigger:
-  - platform: state
+
+  # Built as a real structure and serialised with to_json, so the payload is
+  # valid by construction - NG rejects a malformed body whole.
+  payload_scoreboard: >-
+    {{ {
+         "draw": [
+           ["rectFill",  0, 0, 16, 8, team_colors_0 | string],
+           ["rectFill", 16, 0, 16, 8, opponent_colors_0 | string],
+           ["line",  1, 0,  1, 7, team_colors_1 | string],
+           ["line",  3, 0,  3, 7, team_colors_1 | string],
+           ["line", 28, 0, 28, 7, opponent_colors_1 | string],
+           ["line", 30, 0, 30, 7, opponent_colors_1 | string],
+           ["text",  5, 1, "%02d" | format(team_score | int(0)), "#FFFFFF"],
+           ["text", 20, 1, "%02d" | format(opponent_score | int(0)), "#FFFFFF"],
+           ["line", 14, 3, 17, 3, "#FFFFFF"]
+         ] + period_marker,
+         "durationMs": (message_duration | int) * 1000
+       } | to_json }}
+  payload_switch: '{{ {"name": appname | string} | to_json }}'
+
+triggers:
+  - trigger: state
     entity_id:
       - !input my_sensor
     to: IN
     id: Game Start
-  - platform: state
+  - trigger: state
     entity_id:
       - !input my_sensor
     to: POST
@@ -180,245 +176,64 @@ trigger:
       minutes: 5
       seconds: 0
     id: Game End
-  - platform: state
+  - trigger: state
     entity_id:
       - !input my_sensor
     attribute: team_score
     id: Team Score Change
-  - platform: state
+  - trigger: state
     entity_id:
       - !input my_sensor
     attribute: opponent_score
     id: Opponent Score Change
-  - platform: state
+  - trigger: state
     entity_id:
       - !input my_sensor
     attribute: quarter
-    id: Quarter Change
+    id: Period Change
 
-condition: []
-action:
-  - repeat:
-      for_each: "{{ devices }}"
-      sequence:
-        - choose:
-            - conditions:
+conditions: []
+actions:
+  - choose:
+      # Five minutes after the game goes final, drop the app again.
+      - conditions:
+          - condition: trigger
+            id:
+              - Game End
+        sequence:
+          - repeat:
+              for_each: "{{ devices }}"
+              sequence:
+                # An empty payload on the pushed-app topic deletes the app.
+                - action: mqtt.publish
+                  data:
+                    qos: 0
+                    retain: false
+                    topic: "{{ repeat.item }}/cmd/apps/pushed/{{ appname }}"
+                    payload: ""
+    default:
+      - repeat:
+          for_each: "{{ devices }}"
+          sequence:
+            - action: mqtt.publish
+              data:
+                qos: 0
+                retain: false
+                topic: "{{ repeat.item }}/cmd/apps/pushed/{{ appname }}"
+                payload: "{{ payload_scoreboard }}"
+            # Kick-off and goals jump the loop to the scoreboard; a plain
+            # period change only redraws it in place.
+            - if:
                 - condition: trigger
                   id:
                     - Game Start
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_game_start }}"
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/switch"
-                    payload: "{{ payload_switch }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Quarter Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 1
-                  below: 3
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_second_half }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Quarter Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 2
-                  below: 4
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_third_quarter }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Quarter Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 3
-                  below: 5
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_fourth_quarter }}"
-            - conditions:
-                - condition: trigger
-                  id:
                     - Team Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 0
-                  below: 2
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_game_start }}"
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/switch"
-                    payload: "{{ payload_switch }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Team Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 1
-                  below: 3
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_second_half }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Team Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 2
-                  below: 4
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_third_quarter }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Team Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 3
-                  below: 5
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_fourth_quarter }}"
-            - conditions:
-                - condition: trigger
-                  id:
                     - Opponent Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 0
-                  below: 2
-              sequence:
-                - service: mqtt.publish
+              then:
+                - action: mqtt.publish
                   data:
                     qos: 0
                     retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_game_start }}"
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/switch"
+                    topic: "{{ repeat.item }}/cmd/apps/switch"
                     payload: "{{ payload_switch }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Opponent Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 1
-                  below: 3
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_second_half }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Opponent Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 2
-                  below: 4
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_third_quarter }}"
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Team Score Change
-                - condition: numeric_state
-                  entity_id: !input my_sensor
-                  attribute: quarter
-                  above: 3
-                  below: 5
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
-                    payload: "{{ payload_fourth_quarter }}"                   
-  - repeat:
-      for_each: "{{ devices }}"
-      sequence:
-        - choose:
-            - conditions:
-                - condition: trigger
-                  id:
-                    - Game End
-              sequence:
-                - service: mqtt.publish
-                  data:
-                    qos: 0
-                    retain: false
-                    topic: "{{ repeat.item }}/custom/{{ appname }}"
 mode: restart
