@@ -22,6 +22,17 @@ blueprint:
     shows the shootout tally rather than the goals, which are level by
     definition; the amber divider marks that you are reading penalties.
 
+    ## Goal celebration
+
+    When a goal goes in, an animated full-screen celebration is sent as a
+    notification - it interrupts whatever the panel is showing and hands back
+    to the scoreboard when it finishes. The text is drawn in the colour of
+    whichever side scored, so you can tell at a glance. It is silent.
+
+    Only a real goal fires it: the celebration is skipped when the score
+    attribute merely appears at kick-off, and during a shootout, where the
+    tally changes but the goals do not.
+
     Requires AWTRIX NG firmware with MQTT + Home Assistant discovery enabled.
     For the older AWTRIX 3 / AWTRIX Light firmware, use the previous revision
     of this blueprint - the MQTT topics and payload format are not compatible.
@@ -72,6 +83,73 @@ blueprint:
           filter:
             - integration: teamtracker
 
+    goal:
+      name: Goal celebration
+      icon: mdi:soccer
+      collapsed: true
+      input:
+        goal_celebration:
+          name: Celebrate goals
+          description: >-
+            Whose goals get an animation. It plays as a notification, so it
+            takes over the panel and then hands back to the scoreboard.
+          default: "My team only"
+          selector:
+            select:
+              options:
+                - "Off"
+                - "My team only"
+                - "Both teams"
+
+        goal_effect:
+          name: Animation
+          description: >-
+            The animated background the celebration is drawn over. These are
+            the effects AWTRIX NG ships with; your board's own list is at
+            GET /api/v1/capabilities.
+          default: "Fireworks"
+          selector:
+            select:
+              options:
+                - BrickBreaker
+                - Checkerboard
+                - ColorWaves
+                - Fade
+                - Fireworks
+                - LookingEyes
+                - Matrix
+                - MovingLine
+                - Pacifica
+                - PingPong
+                - Plasma
+                - PlasmaCloud
+                - Radar
+                - Ripple
+                - Snake
+                - SwirlIn
+                - SwirlOut
+                - TheaterChase
+                - TwinklingStars
+
+        goal_text:
+          name: Goal text
+          description: >-
+            Shown over the animation. The panel's global uppercase setting
+            still applies.
+          default: "GOAL!"
+          selector:
+            text:
+
+        goal_duration:
+          name: Goal animation duration
+          description: How long the celebration stays on screen.
+          default: 6
+          selector:
+            number:
+              min: 1
+              max: 60
+              unit_of_measurement: "sec"
+
   source_url: https://github.com/nickbock/blueprints/blob/main/blueprint_soccer_awtrix.yaml
 
 variables:
@@ -92,6 +170,10 @@ variables:
   appname: !input appname
   my_sensor: !input my_sensor
   message_duration: !input message_duration
+  goal_celebration: !input goal_celebration
+  goal_effect: !input goal_effect
+  goal_text: !input goal_text
+  goal_duration: !input goal_duration
 
   # NG validates the whole payload: one unreadable colour rejects everything,
   # so fall back to plain white/black when the sensor has no colours yet.
@@ -121,6 +203,28 @@ variables:
     {% set goals = raw.split('(')[0] | int(0) %}
     {% set pens = raw.split('(')[1] | replace(')', '') | int(-1) if '(' in raw else -1 %}
     {{ pens if pens >= 0 else goals }}
+
+  # Which side just scored, if either. The goal count has to actually rise:
+  # at kick-off the attribute appears as 0 where there was nothing, and in a
+  # shootout the tally in "1(4)" moves while the goals stay put. Neither is
+  # a goal, and both would otherwise set off the celebration.
+  scorer: >-
+    {% if trigger is not defined
+          or trigger.id not in ['Team Score Change', 'Opponent Score Change'] %}
+      none
+    {% else %}
+      {% set attr = 'team_score' if trigger.id == 'Team Score Change' else 'opponent_score' %}
+      {% set before = ((trigger.from_state.attributes.get(attr)
+                        if trigger.from_state else none) | string).split('(')[0] | int(-1) %}
+      {% set after = ((trigger.to_state.attributes.get(attr)
+                       if trigger.to_state else none) | string).split('(')[0] | int(-1) %}
+      {{ ('team' if attr == 'team_score' else 'opponent')
+         if (before >= 0 and after > before) else 'none' }}
+    {% endif %}
+  celebrate: >-
+    {{ goal_celebration != 'Off'
+       and (scorer == 'team'
+            or (scorer == 'opponent' and goal_celebration == 'Both teams')) }}
 
   # Bottom-row period indicator, appended after the base drawing. Row 7 is
   # clear of the scores (rows 1-6), and the penalties case redraws the
@@ -160,6 +264,18 @@ variables:
          "durationMs": (message_duration | int) * 1000
        } | to_json }}
   payload_switch: '{{ {"name": appname | string} | to_json }}'
+  # A notification, not an app: it jumps the queue and disappears on its own,
+  # leaving the scoreboard on screen behind it. stack: false so a quick second
+  # goal replaces the celebration instead of queueing behind it.
+  payload_goal: >-
+    {{ {
+         "text": goal_text | string,
+         "textColor": (team_colors_0 if scorer == 'team'
+                       else opponent_colors_0) | string,
+         "effect": goal_effect | string,
+         "durationMs": (goal_duration | int) * 1000,
+         "stack": false
+       } | to_json }}
 
 triggers:
   - trigger: state
@@ -236,4 +352,16 @@ actions:
                     retain: false
                     topic: "{{ repeat.item }}/cmd/apps/switch"
                     payload: "{{ payload_switch }}"
+            # Board is current before the celebration starts, so the new score
+            # is already there when the notification hands the panel back.
+            - if:
+                - condition: template
+                  value_template: "{{ celebrate }}"
+              then:
+                - action: mqtt.publish
+                  data:
+                    qos: 0
+                    retain: false
+                    topic: "{{ repeat.item }}/cmd/notify"
+                    payload: "{{ payload_goal }}"
 mode: restart
